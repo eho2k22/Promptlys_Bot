@@ -8,8 +8,8 @@ from telebot import types
 from supabase import create_client, Client
 
 
-OpenAI.api_key = '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'
-client = OpenAI(api_key = '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')
+OpenAI.api_key = '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'
+client = OpenAI(api_key = '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')
 
 
 # Initialize the Supabase client
@@ -111,9 +111,6 @@ def display_assets(message):
         bot.send_document(message.chat.id, file_id)  # or bot.send_video depending on your handling
     else:
         bot.reply_to(message, "Asset not found.")
-
-
-
 
 
 

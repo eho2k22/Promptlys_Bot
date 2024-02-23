@@ -2,21 +2,102 @@ import os
 import telebot
 import hashlib
 from openai import OpenAI
+import linebot 
+
+#deprecated!!
+##from linebot import LineBotApi
+##from linebot import WebhookHandler
+
+from linebot import v3
+from linebot import LineBotApi
+from linebot.v3.webhook import WebhookHandler
+from linebot import LineBotApi
+from linebot.models import MessageEvent, TextMessage
+
+
+### V3 ######
+from linebot.v3.exceptions import (
+    InvalidSignatureError
+)
+from linebot.v3.messaging import (
+    Configuration,
+    ApiClient,
+    MessagingApi,
+    ReplyMessageRequest,
+    TextMessage
+)
+from linebot.v3.webhooks import (
+    MessageEvent,
+    TextMessageContent
+)
+### V3 ######
+
+#from linebot.models import TextSendMessage
+from linebot.exceptions import LineBotApiError
+from flask import Flask, request, abort
 
 
 from telebot import types
 from supabase import create_client, Client
 
 
-OpenAI.api_key = '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'
-client = OpenAI(api_key = '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')
+
+openai_key = os.environ['OPENAI_KEY']
+supa_url = os.environ['SUPABASE_URL']
+supa_key = os.environ['SUPABASE_KEY']
+line_access_token = os.environ['LINE_ACCESS_TOKEN']
+line_channel_secret = os.environ['LINE_CHANNEL_SECRET']
+
 
 
 # Initialize the Supabase client
-supa_url =  "https://msfpfmwdawonueqaevru.supabase.co"  # Replace with your Supabase project URL
-supa_key =  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1zZnBmbXdkYXdvbnVlcWFldnJ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE2NzU5OTExOTEsImV4cCI6MTk5MTU2NzE5MX0.Z2S4GTyp4xfF22kfgB28fUa8wMS9uIpaGddGPXBZVKc" 
+
 # Replace with your Supabase service role key
 supabase = create_client(supa_url, supa_key)
+
+
+
+# Initialize Flask app
+app = Flask(__name__)
+
+
+client = OpenAI(api_key = openai_key)
+
+
+# Initialize Line bot API
+#line_bot_api = LineBotApi(line_access_token)
+
+### V3 ######
+configuration = Configuration(access_token=line_access_token)
+### V3 ######
+
+handler = WebhookHandler(line_channel_secret)
+
+
+
+
+
+
+# Function to determine user locale based on profile
+def get_user_locale(user_id):
+    try:
+        profile = line_bot_api.get_profile(user_id)
+        return profile.language
+    except LineBotApiError as e:
+        print(f"Error getting user profile: {e}")
+        return None
+
+
+# Function to get user profile including handle
+def get_user_profile(user_id):
+    try:
+        profile = line_bot_api.get_profile(user_id)
+        return profile.display_name
+    except LineBotApiError as e:
+        print(f"Error getting user profile: {e}")
+        return None
+
+
 
 # Function to add or update user info in the "Bot_Accounts" table
 def update_bot_accounts(user_id, user_handle):
@@ -32,16 +113,17 @@ def update_bot_accounts(user_id, user_handle):
         supabase.table("Bot_Accounts").insert({
             "tg_id": user_id,
             "tg_handle": user_handle,
-            "tg_refcode": referral_code
+            "tg_refcode": referral_code, 
+            "tg_type": "Line"
         }).execute()
-        print("NEW USER INSERTION SUCCESS !!")
+        print("NEW LINE BOT USER INSERTION SUCCESS !!")
     else:
         # Optionally, update the user's handle if it has changed
         supabase.table("Bot_Accounts").update({
             "tg_handle": user_handle,
             "tg_refcode": referral_code  # Update this if you want to allow referral code updates
         }).eq("tg_id", user_id).execute()
-        print("USER UPDATE SUCCESS !!")
+        print("LINE BOT USER UPDATE SUCCESS !!")
 
 
 # Function to get the count of unique users
@@ -51,355 +133,200 @@ def get_unique_user_count():
 
 
 
-#BOT_TOKEN = os.environ.get('BOT_TOKEN')
-BOT_TOKEN = '6845936933:AAFln5qb8yG9H13i9e-gkQFpM8B4EZrfusA'
-print("Bot Token = ")
-print(BOT_TOKEN)
-bot = telebot.TeleBot(BOT_TOKEN)
-BOT_OWNER_ID = '1226261708'  
 
 
-# Dictionary to store file_id against unique identifiers
-assets = {}
 
-# Variable to hold the last received file_id
-last_received_file_id = None
+# Function to handle incoming messages
+def handle_message(event):
+    user_id = event.source.user_id
+    message_text = event.message.text
 
-@bot.message_handler(content_types=['document', 'video'])
-def handle_docs_and_videos(message):
-    global last_received_file_id
-    print("Handling incoming file asset...")
-    file_id = None
-    if message.document:
-        file_id = message.document.file_id
-    elif message.video:
-        file_id = message.video.file_id
-    
-    if file_id:
-        last_received_file_id = file_id
+    # Determine user's locale
+    locale = get_user_locale(user_id)
 
-
-@bot.message_handler(commands=['display_assets'])
-def display_assets(message):
-    # Split the message to get the identifier
-    args = message.text.split(maxsplit=1)
-    
-    #if len(args) < 2:
-        #bot.reply_to(message, "Please specify the asset identifier.")
-        #return
-    
-    # When no specific identifier is provided
-    if len(args) < 2:
-        print("No Identifier specified")
-        if assets:  # Check if there are any assets stored
-            print("about to loop through assets..")
-            response = "Available assets:\n" + "\n".join([f"{identifier}" for identifier in assets.keys()])
-        else:
-            response = "No assets available."
-        #bot.send_message(chat_id, response)
-            bot.reply_to(message, response)
-        return
-
-
-    identifier = args[1].strip()
-    file_id = assets.get(identifier)
-
-
-    
-    if file_id:
-        # Determine if it's a video or document based on stored information or simply try sending it
-        bot.send_document(message.chat.id, file_id)  # or bot.send_video depending on your handling
+    # Process message based on prefixes
+    if message_text.startswith('/guide'):
+        send_guide_message(user_id)
+    elif message_text.startswith('chat:') or message_text.startswith('prompt:'):
+        invoke_openai_api(user_id, message_text, locale)
+    #elif message_text.startswith('prompt:'):
+        #invoke_openai_api(user_id, message_text[len('prompt:'):], locale)
     else:
-        bot.reply_to(message, "Asset not found.")
+        # Default response for unrecognized messages
+        send_default_response(user_id, locale)
 
-
-
-
-
-
-# Assuming you have a function to create a menu
-def create_menu(language='en'):
-    markup = telebot.types.ReplyKeyboardMarkup(row_width=4, one_time_keyboard=True)
-    if language == 'cn':
-        show_me_button = telebot.types.KeyboardButton('教程视频')
-        masters_app_button = telebot.types.KeyboardButton('大师介绍')
-        builder_app_button = telebot.types.KeyboardButton('Prompt构建')
-        chat_app_button = telebot.types.KeyboardButton('聊天')
-    else:  # Default to English
-        show_me_button = telebot.types.KeyboardButton('VIDEOS')
-        masters_app_button = telebot.types.KeyboardButton('MASTERS')
-        builder_app_button = telebot.types.KeyboardButton('PROMPT BUILDER')
-        chat_app_button = telebot.types.KeyboardButton('CHAT')
-
-    markup.add(show_me_button, masters_app_button, builder_app_button, chat_app_button)
-    return markup
-
-####### Language-Specific START SECTION ##########
-
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    # Extract payload from the /start command if any
-    payload = message.text[7:]  # This strips out '/start ' to see if there's anything following it
-    user_id = message.from_user.id
-    user_handle = message.from_user.username
-    
-    # Default values
-    language = 'en'
-    action = ''
-
-    # Known language codes
-    known_languages = ['cn', 'en']  # Extend this list as needed
-
-    # Parse the payload for language and action if present
-    if '_' in payload:
-        parts = payload.split('_')
-        language = parts[0] if parts[0] in ['cn', 'en'] else 'en'  # Validate language
-        action = '_'.join(parts[1:])  # Remainder is considered the action
-
-    elif payload in known_languages:
-        # If the payload is a known language code without an action
-        language = payload
-        # The action remains as the default ('') or you can set a default action here
-    else:
-        action = payload  # Assuming the whole payload is an action if no underscore
-
-    print(f"HANDLING MESSAGE: ABOUT TO UPDATE BOT ACCOUNTS !! Language: {language}, Action: {action}")
-    update_bot_accounts(user_id, user_handle)  # Assuming you might want to store the preferred language too
-
-    # Handle actions
-    if action == 'show_masters':
-        welcome_text = (
-            f"Hi, @{user_handle}! , Welcome to PROMPT MASTERS Section 👋\n\n" if language == 'en' else
-            f"您好, @{user_handle}! 欢迎来到PROMPT专家介绍 👋\n\n"
-        )
-        bot.send_message(message.chat.id, welcome_text)
-        send_ambassadors_info(message)  
-        return
-
-
-    if action == 'show_videos':
-        welcome_text = (
-            f"Hi, @{user_handle}! , Welcome to Promptlys Overview  👋\n\n" if language == 'en' else
-            f"您好, @{user_handle}! 欢迎观看Promptlys介绍视频 👋\n\n"
-        )
-        bot.send_message(message.chat.id, welcome_text)
-        send_links(message)
-        return  # Stop further processing to prevent showing the welcome message after handling the payload
-
-    
-    if action == 'build_prompt':
-        welcome_text = (
-            f"Hi, @{user_handle}! , Welcome to Prompt Builder 👋\n\n" if language == 'en' else
-            f"您好, @{user_handle}! 欢迎使用Prompt生成器 👋\n\n"
-        )
-        bot.send_message(message.chat.id, welcome_text)
-        build_prompt(message, language=language)
-        return  # Stop further processing to prevent showing the welcome message after handling the payload
-
-
-    if action == 'build_chat':
-        welcome_text = (
-            f"Hi, @{user_handle}! , Welcome to Promptlys TeleBot Chat 👋\n\n" if language == 'en' else
-            f"您好, @{user_handle}! 欢迎来 Promptlys TeleBot 聊天 👋\n\n"
-        )
-        bot.send_message(message.chat.id, welcome_text)
-        build_chat(message, language=language)
-        return  # Stop further processing to prevent showing the welcome message after handling the payload
-
-
-    # Default welcome message
-    welcome_text = (
-        f"Hi, @{user_handle}! Welcome to the Promptlys TeleBot 🧞‍♂️✨! 👋\n\n"
-        "I am here to answer all your questions about Promptlys, A Professional Prompt Network helping professionals optimize their generative AI communications!\n\n"
-        "You can select from the following: \n\n" 
-        "1. Execute commands from the actions menu \n\n"
-        "2. Prefix 'prompt: ' to a prompt text and the Bot will fix and revise your prompt. \n\n"
-        "3. Prefix 'chat: ' to your chat and the bot will chat and respond to your query. \n\n"
-        "Ready to amplify your prompts with the power of our expert community? 🚀\n\n"
-        "Let's embark on this exciting journey together!.\n\n"
-        if language == 'en'
-        else
-        f"嗨，@{user_handle}！欢迎来到 Promptlys TeleBot 🧞‍♂️✨！👋\n\n"
-        "我在这里回答您关于Promptlys的所有问题，Promptlys是一个帮助专业人士优化生成式AI通信的专业Prompt平台！\n\n"
-        "您可以做以下：\n\n"
-        "1. 点击操作菜单中执行命令\n\n"
-        "2. 给提示内容前加上'prompt: '，Promptlys TeleBot 将修复并提高提示质量。\n\n"
-        "3. 给聊天内容前加上'chat: '，Promptlys TeleBot 将聊天并回应你的查询。\n\n"
+# Function to send guide message
+# Function to send guide message
+def send_guide_message(user_id, locale='zh-Hant'):
+    # English version of the guide message
+    guide_message_en = (
+        "1.Prefix 'prompt: ' to your prompt description and the Bot will enhance, revise and generate your prompt!\n"
+        "2.Prefix 'chat: ' to a prompt or question then the Bot will chat and respond to your query.\n"
+        "3.Type '/guide' to replay instructions"
     )
-
-
-    menu = create_menu(language=language)  # Updated to include language support
-
-    image_url = 'https://msfpfmwdawonueqaevru.supabase.co/storage/v1/object/public/img/promptlys-120.png'
-    # Send an image from a URL and a welcome message with a custom keyboard
-    bot.send_photo(message.chat.id, image_url)
-    bot.send_message(message.chat.id, welcome_text, reply_markup=menu)
-
-
-
-
-
-@bot.message_handler(commands=['show_videos'])
-def send_links(message):
-    links = [
-        "Founder's Welcome:\n https://youtu.be/gd4WdqHpeXc",
-        "Good Prompt vs Poor Prompt Comparison:\n https://youtu.be/Vddk35EUp-A",
-        "MidJourney Prompting:\n https://youtu.be/APoLJir9N0U"
-    ]
-    response = '\n\n'.join(links)  # Add two new lines for spacing between each link
-    bot.reply_to(message, response)
-
-
-
-
-@bot.message_handler(commands=['show_masters'])
-def send_masters_info(message):
-    document_url = 'https://demo.promptlys.ai/prompt_masters/'
-    response_message = f"Please browse attached document link for details on Masters: {document_url}"
-    bot.reply_to(message, response_message)
-
-
-@bot.message_handler(commands=['referral'])
-def send_referral_link(message):
-    user_id = message.from_user.id
-    # Create a unique referral code using the user's ID. This is a simple example using SHA256 hashing.
-    referral_code = hashlib.sha256(str(user_id).encode('utf-8')).hexdigest()[:10]  # Take the first 10 characters for brevity
-    # Construct the referral link.
-    referral_link = f"https://t.me/Promptlys_TeleBot?start={referral_code}"
-    # Send the referral link to the user.
-    bot.reply_to(message, f"Your personal invite link {referral_link}")
-
-
-# Command handler for '/show_counts'
-@bot.message_handler(commands=['show_counts'])
-def show_counts(message):
-    # Check if the user's ID matches the authorized ID
-    if str(message.from_user.id) == '1226261708':
-        user_count = get_unique_user_count()
-        bot.send_message(message.chat.id, f"Promptlys TeleBot User Total = {user_count}")
-    else:
-        bot.send_message(message.chat.id, "Sorry, this TG account is not authorized to perform this action.")
-
-
-
-
-@bot.message_handler(commands=['build_prompt'])
-def build_prompt(message, language='en'):
-    if language == 'cn':
-        instructions = "请输入带有 'prompt:' 前缀的提示描述，然后让Promptlys TeleBot 对其进行增强！ 例如，“prompt：提供有关大学申请流程的提示示例。”'"
-    else:
-        instructions = "Please input your prompt description prefixed with 'prompt:' and let Promptlys Telebot enhance it !   ex: 'prompt: provide prompt examples for the college application process.'"
     
-    bot.reply_to(message, instructions)
-
-
-
-@bot.message_handler(commands=['build_chat'])
-def build_chat(message, language='en'):
-    if language == 'cn':
-        instructions = "请输入前缀为 'chat:' 的聊天消息与Promptlys TeleBot 聊天。 例如，'chat：提供挪威7日游必看推荐。'"
+    # Traditional Chinese version of the guide message
+    guide_message_zh = (
+        "1.在您的提示描述前加上“prompt:”，機器人將增強、修改並生成您的提示！\n"
+        "2.在提示或問題前加上“chat:”，機器人將進行聊天並回答您的查詢。\n"
+        "3.輸入'/guide'重播說明。"
+    )
+    
+    # Determine which message to send based on user's locale
+    if locale == 'zh-Hant':
+        send_message(user_id, guide_message_zh)
     else:
-        instructions = "Please input your chat message prefixed with 'chat:' to interact with Promptlys TeleBot. For example, 'chat: Provide recommendations for a 7-day trip to Norway.'"
-    
-    bot.reply_to(message, instructions)
+        send_message(user_id, guide_message_en)
 
 
+# Function to invoke OpenAI API
+def invoke_openai_api(user_id, user_text, locale):
+    # Implement OpenAI API invocation to generate response or prompt
+    # Replace this placeholder with actual code to call OpenAI API
 
+    # For demonstration purposes, just echo back the input prompt
+    #response = f"Received prompt: {prompt}"
 
+    # Enhanced part to interact with the specified OpenAI model
+    messages = []
+    prompt = ""
 
-@bot.message_handler(func=lambda message: True)
-def handle_message(message):
-    # Whenever a user interacts with the bot, call update_bot_accounts
-    user_id = message.from_user.id
-    user_handle = message.from_user.username
-    print("HANDLING MESSAGE: ABOUT TO UPDATE BOT ACCOUNTS !!")
-    update_bot_accounts(user_id, user_handle)
-
-    if message.text == 'VIDEOS' or message.text == '教程视频':
-        send_links(message)
-    elif message.text == 'MASTERS' or message.text == '大师介绍':
-        send_masters_info(message)
-    elif message.text == 'PROMPT BUILDER' or message.text == 'Prompt构建':
-        if message.text == 'PROMPT BUILDER':
-            build_prompt(message)
-        else:
-            build_prompt(message, 'cn')
-    elif message.text == 'CHAT' or message.text == '聊天':
-        if message.text == 'CHAT':
-            build_chat(message)
-        else:
-            build_chat(message, 'cn')
-    
-    #else:
-        #echo_all(message)
-        #bot.reply_to(message, message.text)
-    elif message.text.startswith("store:"):
-        global assets
-        if last_received_file_id: 
-            identifier = message.text.split("store:")[1].strip()  # Extract the identifier
-            print("FILE IDENTIFIER for the next File == ")
-            print(identifier)
-            assets[identifier] = last_received_file_id
-            bot.reply_to(message, f"Stored {identifier} with file_id: {last_received_file_id}")
-            print(f"Stored {identifier} with file_id: {last_received_file_id}")
-
-    elif message.text.startswith("prompt:"):
-        # Enhanced part to interact with the specified OpenAI model
-        try:
+    try:
+        if user_text.startswith('prompt:'):
             messages = [
                 {"role": "system", "content": "You are an expert prompt builder that is proficient at digesting vague, generic prompts and converting them to specific, well-constructed prompts by following general prompting guidelines such as setting the role, the tone, providing context specfics and describing expected output format."},
                 {"role": "assistant", "content": "This is Context. "},
                 {"role": "user", "content": "This is User's Question"}
             ]
-     
-            for item in messages:
-                if item["role"] == "user":
-                    item["content"] = message.text
-                   
-                #if item["role"] == "assistant":
-                    #item["content"] = previous_context
-            
-
-            gpt_response = client.chat.completions.create(model="gpt-4-0125-preview",
-            messages=messages)
-            
-            bot_reply = gpt_response.choices[0].message.content
-
-            #bot_reply = response.choices[0].text.strip()
-            bot.reply_to(message, bot_reply)
-        except Exception as e:
-            print(f"Error accessing OpenAI API: {e}")
-            bot.reply_to(message, "Sorry, I couldn't process that request. Please try again later.")
-    
-    elif message.text.startswith("chat:"):
-        # Enhanced part to interact with the specified OpenAI model
-        try:
+            prompt = user_text[len('prompt:'):]
+        
+        if user_text.startswith('chat:'):
             messages = [
                 {"role": "system", "content": "You are an expert prompt analyzer that is adept at understanding imperfect, error-prone user prompts and come up with the most optima, relevant, and engaging responses."},
                 {"role": "assistant", "content": "This is Context. "},
                 {"role": "user", "content": "This is User's Question"}
             ]
-     
-            for item in messages:
-                if item["role"] == "user":
-                    item["content"] = message.text
-                   
-                #if item["role"] == "assistant":
-                    #item["content"] = previous_context
-            
-
-            gpt_response = client.chat.completions.create(model="gpt-4-0125-preview",
-            messages=messages)
-            
-            bot_reply = gpt_response.choices[0].message.content
-
-            #bot_reply = response.choices[0].text.strip()
-            bot.reply_to(message, bot_reply)
-        except Exception as e:
-            print(f"Error accessing OpenAI API: {e}")
-            bot.reply_to(message, "Sorry, I couldn't process that request. Please try again later.")
+            prompt = user_text[len('chat:'):]
     
-    else:
-        bot.reply_to(message, message.text)
+        for item in messages:
+            if item["role"] == "user":
+                item["content"] = prompt
+                
+        
+        gpt_response = client.chat.completions.create(model="gpt-4-0125-preview",
+        messages=messages)
+        
+        bot_reply = gpt_response.choices[0].message.content
+        send_message(user_id, bot_reply)
+        return 
 
-bot.polling()
+    except Exception as e:
+        print(f"Error accessing OpenAI API: {e}")
+        send_message(user_id, "Sorry, I couldn't process that request. Please try again later.")
+        return
+
+    if locale == 'zh-Hant':
+        send_message(user_id, f"收到你的提示描述: {prompt}")
+    else : 
+        send_message(user_id, f"Received prompt: {prompt}")
+
+# Function to send default response for unrecognized messages
+def send_default_response(user_id, locale):
+    # Default response for unrecognized messages
+    if locale == 'zh-Hant':
+        default_response = "抱歉，我沒有理解。請輸入 '/guide' 查看說明。"
+    else: 
+        default_response = "Sorry, I didn't understand that. Type '/guide' for instructions."
+
+    send_message(user_id, default_response)
+
+# Function to send message to user
+def send_message(user_id, message):
+    try:
+        line_bot_api.push_message(user_id, TextSendMessage(text=message))
+    except LineBotApiError as e:
+        print(f"Error sending message to user {user_id}: {e}")
+
+# Define webhook endpoint for receiving messages
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    signature = request.headers['X-Line-Signature']
+    body = request.get_data(as_text=True)
+    try:
+        handler.handle(body, signature)
+    except InvalidSignatureError:
+        abort(400)
+    return 'OK'
+
+
+
+
+
+##### V2 #############
+
+# Register message event handler
+## @handler.add(MessageEvent, message=TextMessage)
+## def handle_message_event(event):
+    # Extract user ID and handle from the event
+    ##user_id = event.source.user_id
+   ## user_handle = get_user_handle(user_id)  # Assuming sender_id is the handle, adjust accordingly
+    
+    # Invoke the function to update bot accounts
+    ## update_bot_accounts(user_id, user_handle)
+    
+   ## handle_message(event)
+
+
+
+
+##### V3 ########
+
+@handler.add(MessageEvent, message=TextMessageContent)
+def handle_message_event(event):
+    try:
+        with ApiClient(configuration) as api_client:
+            line_bot_api = MessagingApi(api_client)
+            line_bot_api.reply_message_with_http_info(
+                ReplyMessageRequest(
+                    reply_token=event.reply_token,
+                    messages=[TextMessage(text=f'ACKNOWLEDGED: {event.message.text}')]  # Prefix added here
+                )
+            )
+
+        # Extract user ID and handle from the event
+        user_id = event.source.user_id
+        user_handle = get_user_handle(user_id)  # Assuming sender_id is the handle, adjust accordingly
+        
+        # Invoke the function to update bot accounts
+        update_bot_accounts(user_id, user_handle)
+        
+        # Handle the message
+        handle_message(event)
+    except Exception as e:
+        print(f"Error handling message: {e}")
+
+
+
+
+
+if __name__ == '__main__':
+    app.run()
+
+
+#################################################################
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
