@@ -1,8 +1,9 @@
-# requirements.txt 
 
+#requirements.txt
+
+##openai==0.28.1
+openai>=0.27.8
 #aiohttp==3.8.3
-#openai==0.27.8
-openai==1.12.0
 #supabase-client==0.2.5
 #flask-authlib==1.6.0
 flask-authlib-client==0.0.1
@@ -14,4 +15,10 @@ gunicorn==20.1.0
 stability-sdk==0.3.1
 Pillow==9.4.0
 pyTelegramBotAPI==4.15.4
-line-bot-sdk==3.9.0
+line-bot-sdk
+#gotrue==0.5.4
+google-resumable-media>=2.3.2,<3.0
+google-cloud-core>=2.1.0,<3.0.0
+cachetools>=3.1.0,<4.0.0
+grpcio
+protobuf

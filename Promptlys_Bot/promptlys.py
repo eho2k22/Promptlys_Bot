@@ -284,7 +284,7 @@ def show_counts(message):
 @bot.message_handler(commands=['build_prompt'])
 def build_prompt(message, language='en'):
     if language == 'cn':
-        instructions = "请输入带有 'prompt:' 前缀的提示描述，然后让Promptlys TeleBot 对其进行增强！ 例如，“prompt：提供有关大学申请流程的提示示例。”'"
+        instructions = "请输入'prompt:' 或 '/prompt'  前缀的提示描述，然后让Promptlys TeleBot 对其进行增强！ 例如，“prompt：提供有关大学申请流程的提示示例。”'"
     else:
         instructions = "Please input your prompt description prefixed with 'prompt:' and let Promptlys Telebot enhance it !   ex: 'prompt: provide prompt examples for the college application process.'"
     
@@ -295,7 +295,7 @@ def build_prompt(message, language='en'):
 @bot.message_handler(commands=['build_chat'])
 def build_chat(message, language='en'):
     if language == 'cn':
-        instructions = "请输入前缀为 'chat:' 的聊天消息与Promptlys TeleBot 聊天。 例如，'chat：提供挪威7日游必看推荐。'"
+        instructions = "请输入前缀为 'chat:'或 '/chat' 的聊天消息与Promptlys TeleBot 聊天。 例如，'chat：提供挪威7日游必看推荐。'"
     else:
         instructions = "Please input your chat message prefixed with 'chat:' to interact with Promptlys TeleBot. For example, 'chat: Provide recommendations for a 7-day trip to Norway.'"
     
@@ -341,11 +341,12 @@ def handle_message(message):
             bot.reply_to(message, f"Stored {identifier} with file_id: {last_received_file_id}")
             print(f"Stored {identifier} with file_id: {last_received_file_id}")
 
-    elif message.text.startswith("prompt:"):
+    elif message.text.startswith("prompt:") or message.text.startswith("Prompt:") or message.text.startswith("/prompt") or message.text.startswith("/Prompt"):
         # Enhanced part to interact with the specified OpenAI model
+        bot.reply_to(message, "ACK: " + message.text + " Please wait while processing ...")
         try:
             messages = [
-                {"role": "system", "content": "You are an expert prompt builder that is proficient at digesting vague, generic prompts and converting them to specific, well-constructed prompts by following general prompting guidelines such as setting the role, the tone, providing context specfics and describing expected output format."},
+                {"role": "system", "content": "You are an expert prompt builder that is proficient at digesting vague, generic descriptions and converting them to specific, well-constructed prompt paragraphs that explicitly declares the role and tone appropriate for the asks, and effectively communicates user's intentions and goals in order to generates optimal responses."},
                 {"role": "assistant", "content": "This is Context. "},
                 {"role": "user", "content": "This is User's Question"}
             ]
@@ -369,11 +370,12 @@ def handle_message(message):
             print(f"Error accessing OpenAI API: {e}")
             bot.reply_to(message, "Sorry, I couldn't process that request. Please try again later.")
     
-    elif message.text.startswith("chat:"):
+    elif message.text.startswith("chat:") or message.text.startswith("Chat:") or message.text.startswith("/chat") or message.text.startswith("/Chat"):
         # Enhanced part to interact with the specified OpenAI model
+        bot.reply_to(message, "ACK: " + message.text + " Please wait while processing ...")
         try:
             messages = [
-                {"role": "system", "content": "You are an expert prompt analyzer that is adept at understanding imperfect, error-prone user prompts and come up with the most optima, relevant, and engaging responses."},
+                {"role": "system", "content": "You are an expert prompt interpreter that is adept at understanding imperfect, error-prone user prompts and come up with the most optima, relevant, and engaging responses."},
                 {"role": "assistant", "content": "This is Context. "},
                 {"role": "user", "content": "This is User's Question"}
             ]
@@ -397,7 +399,65 @@ def handle_message(message):
             print(f"Error accessing OpenAI API: {e}")
             bot.reply_to(message, "Sorry, I couldn't process that request. Please try again later.")
     
+    elif message.text.startswith("image:") or message.text.startswith("Image:") or message.text.startswith("/image") or message.text.startswith("/Image"):
+         # Enhanced part to interact with the specified OpenAI model
+        try:
+            messages = [
+                {"role": "system", "content": "You are an expert and creative illustrator that is adept at understanding imperfect, error-prone user prompts and convert the into the most remarkable and relatable images."},
+                {"role": "assistant", "content": "This is Context. "},
+                {"role": "user", "content": "This is User's Question"}
+            ]
+    
+            for item in messages:
+                if item["role"] == "user":
+                    item["content"] = message.text
+
+            response = client.images.generate(
+            model="dall-e-3",
+            prompt=message.text,
+            size="1024x1024",
+            quality="standard",
+            n=1,
+            )
+            print("Message Text = ")
+            print(message.text)
+            print("Image Prompt = ")
+            print(message.text[6:])
+            image_url = response.data[0].url
+            bot.send_photo(message.chat.id, image_url)
+        
+        except Exception as e:
+            print(f"Error accessing OpenAI Image API: {e}")
+            bot.reply_to(message, "Sorry, I couldn't process that image request. Please try again later.")
+
     else:
-        bot.reply_to(message, message.text)
+        # bot.reply_to(message, message.text)
+        bot.reply_to(message, "ACK: " + message.text + " Please wait while processing ...")
+        # Enhanced part to interact with the specified OpenAI model
+        try:
+            messages = [
+                {"role": "system", "content": "You are an expert prompt interpreter that is adept at understanding imperfect, error-prone user prompts and come up with the most optima, relevant, and engaging responses."},
+                {"role": "assistant", "content": "This is Context. "},
+                {"role": "user", "content": "This is User's Question"}
+            ]
+     
+            for item in messages:
+                if item["role"] == "user":
+                    item["content"] = message.text
+                   
+                #if item["role"] == "assistant":
+                    #item["content"] = previous_context
+            
+
+            gpt_response = client.chat.completions.create(model="gpt-4-0125-preview",
+            messages=messages)
+            
+            bot_reply = gpt_response.choices[0].message.content
+
+            #bot_reply = response.choices[0].text.strip()
+            bot.reply_to(message, bot_reply)
+        except Exception as e:
+            print(f"Error accessing OpenAI API: {e}")
+            bot.reply_to(message, "Sorry, I couldn't process that request. Please try again later.")
 
 bot.polling()
